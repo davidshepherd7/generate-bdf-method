@@ -1,21 +1,27 @@
+#! /usr/bin/env python
+
+"""A script to generate code for high order explicit or implicit BDF methods.
+
+By default code for eBDF3 is generated. Play with the code in the main()
+function to generate other methods.
+
+Tested with python 2.76 (but hopefully compatible with python 3+) and sympy
+version 0.7.4.1.
+"""
+
 
 from __future__ import division
 from __future__ import absolute_import
+from __future__ import print_function
 
 import sympy
-import scipy.misc
 import sys
 import itertools as it
 
 from sympy import Rational as sRat
 from operator import mul
 from functools import partial as par
-
-import simpleode.core.utils as utils
 from functools import reduce
-
-
-# A set of functions for symbolically calculating bdf forumlas.
 
 
 # Define some (global) symbols to use
@@ -23,7 +29,10 @@ dts = list(sympy.var('Delta:9', real=True))
 dys = list(sympy.var('Dy:9', real=True))
 ys = list(sympy.var('y:9', real=True))
 
-# subs i => step n+1-i (with Delta_{n+1} = t_{n+1} - t_n)
+# Internally we use the notation 0 = n+1, 1 = n, 2 = n-1, etc. because it makes
+# life much easier.
+
+# (with Delta_{n+1} = t_{n+1} - t_n)
 
 
 def divided_diff(order, ys, dts):
@@ -44,45 +53,7 @@ def divided_diff(order, ys, dts):
         return (ys[0] - ys[-1])/(dts[0])
 
 
-def old_bdf_prefactor(order, implicit):
-    """Calculate the non-divided difference part of the bdf approximation.
-    For implicit this is the product term in (5.12) on page 400 of
-    Hairer1991. For explicit it's more tricky and not given in any book
-    that I've found, I derived it from expressions on pgs 400, 366 of
-    Hairer1991.
-    """
-
-    def accumulate(iterable):
-        """Return running totals (from python 3.2), i.e.
-
-        accumulate([1,2,3,4,5]) --> 1 3 6 10 15
-        """
-        it = iter(iterable)
-        total = next(it)
-        yield total
-        for element in it:
-            total = total + element
-            yield total
-
-    assert(order >= 0)
-
-    if order == 0:
-        return 0
-    elif order == 1:
-        return 1
-    else:
-        if implicit:
-            # dt0 * (dt0 + dt1) * (dt0 + dt1 + dt2) * ... (dt0 + dt1 + ... +
-            # dt_{order-1})
-            return _product(accumulate(dts[0:order-1]))
-        else:
-            # the maths is messy here... Basically the same as above but
-            # with some different terms
-            terms = it.chain([dts[0]], accumulate(dts[1:order-1]))
-            return -1 * _product(terms)
-
-
-def _steps_diff_to_list_of_dts(a, b, missing=None):
+def _steps_diff_to_list_of_dts(a, b):
     """Get t_a - t_b in terms of dts.
 
     e.g.
@@ -95,7 +66,7 @@ def _steps_diff_to_list_of_dts(a, b, missing=None):
     # if a and b are in the "wrong" order then it's just the negative of
     # the sum with them in the "right" order.
     if a > b:
-        return map(lambda x: -1*x, _steps_diff_to_list_of_dts(b, a, missing))
+        return [-x for x in  _steps_diff_to_list_of_dts(b, a)]
 
     return dts[a:b]
 
@@ -127,12 +98,12 @@ def bdf_prefactor(order, derivative_point):
         # Get a list of l values for which to calculate the product terms.
         l_list = [l for l in range(0, order) if l != i]
 
-        # Calculate a list of product terms (in terms of dts).
-        c = map(lambda b: sum(_steps_diff_to_list_of_dts(derivative_point, b)),
-                l_list)
+        # Calculate a list of product terms (in terms of Delta t symbols).
+        c = [ sum(_steps_diff_to_list_of_dts(derivative_point, b))
+              for b in l_list ]
 
         # Multiply together and add to total
-        terms = terms + _product(c)
+        terms += _product(c)
 
     return terms
 
@@ -146,45 +117,45 @@ def bdf_method(order, derivative_point=0):
     # divided difference. Basically just a python implementation of
     # equation (5.12) on page 400 of Hairer1991.
     def single_term(n):
-        return (
-            bdf_prefactor(
-                n,
-                derivative_point) * divided_diff(n,
-                                                 ys[:n+1],
-                                                 dts[:n])
-        )
+        return (bdf_prefactor(n, derivative_point)
+                * divided_diff(n, ys[:n+1], dts[:n]))
 
-    return sum(map(single_term, range(1, order+1)))
+    return sum([single_term(i) for i in range(1, order+1)])
 
 
 def main():
 
-    print sympy.pretty(sympy.collect(bdf_method(2, 0).expand(), ys).simplify())
+    print("\nNotation:")
+    print("dtn = size of nth time step")
+    print("yn = value of y at nth step")
+    print("Dyn = derivative at nth step (i.e. f(t_n, y_n))")
+    print("nm1 = n-1, np1 = n+1, etc.")
+    print("** is the power operator")
 
-    print "code for ibdf2 step:"
-    print my_bdf_code_gen(2, 0, True)
+    print("\n\nAs an example the code for eBDF1 (i.e. forward Euler) is:")
+    print("ynp1 =", my_bdf_code_gen(1, 1, True))
 
-    # print "\n\n code for eBDF3 step:"
-    # print my_bdf_code_gen(3, 1, False)
+    print("\n\nAnother example, the code for eBDF2 (i.e. leapfrog) is:")
+    print("ynp1 =", my_bdf_code_gen(2, 1, True))
 
-    # print "\n\n code for iBDF3 dydt approximation:"
-    # print my_bdf_code_gen(3, 0, True)
-
-    print "\n\n code for iBDF3 step:"
-    print my_bdf_code_gen(3, 0, True)
-
-    # print "\n\n code for iBDF4 dydt approximation:"
-    # print my_bdf_code_gen(4, 0, True)
-
-    print "\n\n code for eBDF3 step w/ derivative at n-1:"
-    print my_bdf_code_gen(3, 2, True)
-
-    # print sympy.pretty(sympy.Eq(dys[2], bdf_method(1, 2)))
-    # print sympy.pretty(sympy.Eq(dys[2], bdf_method(2, 2)))
-    # print sympy.pretty(sympy.Eq(dys[2], bdf_method(3, 2)))
+    print("\n\nFinally, the code for a step of eBDF3 is:")
+    print("ynp1 =", my_bdf_code_gen(3, 1, True))
+    # 3rd order method, with derivative at time n (i.e. n+1-1), do solve
+    # for y_{n+1} (so that the output can
 
 
 def my_bdf_code_gen(order, derivative_point, solve_for_ynp1):
+    """Print code for a bdf method.
+
+    derivative_point = 0 is implicit, derivative_point = 1 is the
+    explicit methods used in the paper. Higher values generate other
+    explicit methods where the derivative function is evaluated further
+    back in time, these may or may not be of any use to anyone ever.
+
+    Derive a bdf method, rearrange to the form given in the paper,
+    replace the variable names by slightly more friendly strings and
+    print the code.
+    """
 
     dydt_expr = bdf_method(order, derivative_point)
 
@@ -233,6 +204,8 @@ if __name__ == '__main__':
 # Tests
 # ============================================================
 
+# run tests with the command `nosetests [filename]`.
+
 def assert_sym_eq(a, b):
     """Compare symbolic expressions. Note that the simplification algorithm
     is not completely robust: might give false negatives (but never false
@@ -249,11 +222,11 @@ def assert_sym_eq(a, b):
         except AttributeError:
             return expr
 
-    print
-    print sympy.pretty(my_simp(a))
-    print "equals"
-    print sympy.pretty(my_simp(b))
-    print
+    print()
+    print(sympy.pretty(my_simp(a)))
+    print("equals")
+    print(sympy.pretty(my_simp(b)))
+    print()
 
     # Try to simplify the difference to zero
     assert (my_simp(a - b) == 0)
@@ -359,33 +332,5 @@ def test_list_dts():
 
 def test_product():
     assert _product([]) == 1
-    assert _product(xrange(1, 11)) == scipy.misc.factorial(10, True)
+    assert _product(xrange(1, 11)) == 3628800 # scipy.mpmath.factorial(10)
     assert _product(xrange(0, 101)) == 0
-
-
-def test_generalised_bdf_prefactor():
-    def check(order, implicit):
-        old = old_bdf_prefactor(order, implicit)
-        if implicit:
-            new = bdf_prefactor(order, 0)
-        else:
-            new = bdf_prefactor(order, 1)
-        assert_sym_eq(old, new)
-
-    orders = [0, 1, 2, 3, 4]
-    for order in orders:
-        for implicit in [True, False]:
-            yield check, order, implicit
-
-    def check_new_ones(order, real_value):
-        calculated = bdf_prefactor(order, 2)
-        assert_sym_eq(real_value, calculated)
-
-    real_values = [(0, 0),
-                   (1, 1),
-                   (2, (-dts[0] - dts[1]) - dts[1]),
-                   (3, (-dts[0] - dts[1])*-dts[1]),
-                   (4, (-dts[0] - dts[1])*-dts[1]*dts[2]),
-                   ]
-    for order, real_value in real_values:
-        yield check_new_ones, order, real_value
