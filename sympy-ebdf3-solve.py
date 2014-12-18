@@ -17,6 +17,7 @@ from __future__ import print_function
 import sympy
 import sys
 import itertools as it
+import argparse
 
 from sympy import Rational as sRat
 from operator import mul
@@ -108,7 +109,7 @@ def bdf_prefactor(order, derivative_point):
     return terms
 
 
-def bdf_method(order, derivative_point=0):
+def bdf_method(order, derivative_point):
     """Calculate the bdf approximation for dydt. If implicit approximation
     is at t_{n+1}, otherwise it is at t_n.
     """
@@ -123,56 +124,78 @@ def bdf_method(order, derivative_point=0):
     return sum([single_term(i) for i in range(1, order+1)])
 
 
-def main():
+def derive_full_method(order, derivative_point):
+    """Return the bdf method's formula for ynp1
 
-    print("\nNotation:")
-    print("dtn = size of nth time step")
-    print("yn = value of y at nth step")
-    print("Dyn = derivative at nth step (i.e. f(t_n, y_n))")
-    print("nm1 = n-1, np1 = n+1, etc.")
-    print("** is the power operator")
-
-    print("\n\nAs an example the code for eBDF1 (i.e. forward Euler) is:")
-    print("ynp1 =", my_bdf_code_gen(1, 1, True))
-
-    print("\n\nAnother example, the code for eBDF2 (i.e. leapfrog) is:")
-    print("ynp1 =", my_bdf_code_gen(2, 1, True))
-
-    print("\n\nFinally, the code for a step of eBDF3 is:")
-    print("ynp1 =", my_bdf_code_gen(3, 1, True))
-    # 3rd order method, with derivative at time n (i.e. n+1-1), do solve
-    # for y_{n+1} (so that the output can
-
-
-def my_bdf_code_gen(order, derivative_point, solve_for_ynp1):
-    """Print code for a bdf method.
-
-    derivative_point = 0 is implicit, derivative_point = 1 is the
-    explicit methods used in the paper. Higher values generate other
-    explicit methods where the derivative function is evaluated further
-    back in time, these may or may not be of any use to anyone ever.
-
-    Derive a bdf method, rearrange to the form given in the paper,
-    replace the variable names by slightly more friendly strings and
-    print the code.
+    (simplified expression)
     """
 
     dydt_expr = bdf_method(order, derivative_point)
 
-    if solve_for_ynp1:
-        # Set equal to dydt at derivative-point-th step, then solve for y_{n+1}
-        bdf_method_solutions = sympy.solve(sympy.Eq(dydt_expr,
-                                                    dys[derivative_point]), y0)
+    # Set equal to dydt at derivative-point-th step, then solve for y_{n+1}
+    bdf_method_solutions = sympy.solve(sympy.Eq(dydt_expr,
+                                                dys[derivative_point]), y0)
 
-        # Check there's one solution only
-        assert(len(bdf_method_solutions) == 1)
+    # Check there's one solution only
+    assert(len(bdf_method_solutions) == 1)
 
-        # Convert it to a string
-        bdf_method_code = str(
-            bdf_method_solutions[0].expand().collect(ys+dys).simplify())
+    # Convert to nicer form
+    our_bdf_method = \
+        bdf_method_solutions[0].expand().collect(ys+dys).simplify()
 
-    else:
-        bdf_method_code = str(dydt_expr.expand().collect(ys+dys).simplify())
+    return our_bdf_method
+
+
+def main():
+    """Construct implicit or explicit bdf methods.
+
+    \nCode notation:
+    dtn = size of nth time step
+    yn = value of y at nth step
+    Dyn = derivative at nth step (i.e. f(t_n, y_n))
+    nm1 = n-1, np1 = n+1, etc.
+    ** is the power operator
+    """
+
+    # Parse arguments
+    parser = argparse.ArgumentParser(description=main.__doc__,
+
+    # Don't mess up my formating in the help message
+    formatter_class=argparse.RawDescriptionHelpFormatter)
+
+    parser.add_argument('--order', action = "store",
+                        type=int,
+                        help="order of the method to generate",
+                        required=True)
+
+    parser.add_argument('--explicit', action = "store",
+                        type=bool,
+                        help="Generate explicit bdf method? (true/false)",
+                        required=True)
+
+    args = parser.parse_args()
+
+    print("I'm computing the",
+          "explicit" if args.explicit else "implicit",
+          "BDF methd of order", args.order, ".\n\n")
+
+
+    our_bdf_method = derive_full_method(args.order,
+                                        1 if args.explicit else 0)
+
+
+    print("The symbolic representation is [may require a unicode-enabled terminal]:\n")
+    print(sympy.pretty(our_bdf_method))
+
+    print("\n\nThe code is:")
+    print(code_gen(our_bdf_method))
+
+
+def code_gen(sympy_method):
+    """Convert sympy formula to code.
+    """
+
+    bdf_method_code = str(sympy_method)
 
     # Replace the sympy variables with variable names consistent with my
     # code in ode.py
@@ -194,7 +217,7 @@ def my_bdf_code_gen(order, derivative_point, solve_for_ynp1):
         for key, _ in sympy_to_odepy_code_string_replacements.iteritems():
             assert(replacement not in key)
 
-    return bdf_method_code
+    return "ynp1 = " + bdf_method_code
 
 
 if __name__ == '__main__':
