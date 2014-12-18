@@ -1,7 +1,5 @@
-bdf-method-generator
-====================
 
-A script to generate code for high order explicit or implicit BDF methods.
+A script to generate code and symbolic expressions for high order explicit or implicit BDF methods using computational algebra (`sympy`).
 
 The BDF methods are a widely used family of initial value ordinary
 differential equation solvers. In normal usage only the implicit methods of
